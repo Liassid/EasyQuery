@@ -1,0 +1,63 @@
+﻿name: Build
+
+on:
+  push:
+    branches: [ master ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Checkout SCP-SL-Remote-Query-Admin repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'zabszk/SCP-SL-Remote-Query-Admin'
+          path: remote-query-admin
+
+      - name: Build SCP SL Query Client
+        run: |
+          dotnet build "remote-query-admin/SCP SL Query Client/SCP SL Query Client.csproj" -c Release -f netstandard2.0 -o ${{ github.workspace }}/remote-query-admin-output
+
+      - name: Delete SCP-SL-Remote-Query-Admin checkout
+        run: |
+          rm -rf "${{ github.workspace }}/remote-query-admin"
+
+      - name: Determine Version
+        id: version_step
+        run: |
+          VERSION_DATE=$(date +'%Y.%m.%d')
+          SHORT_RUN_PART=$(( (10#${{ github.run_id }} % 65500) + 10#${{ github.run_attempt }} ))
+          VERSION_TAG="${VERSION_DATE}.${SHORT_RUN_PART}"
+          echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Build EasyQuery
+        run: |
+          dotnet build EasyQuery.csproj -c Release /p:Version="${{ steps.version_step.outputs.version_tag }}" /p:AssemblyVersion="${{ steps.version_step.outputs.version_tag }}" /p:FileVersion="${{ steps.version_step.outputs.version_tag }}" /p:RemoteQueryAdminOutput="${{ github.workspace }}/remote-query-admin-output"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version_step.outputs.version_tag }}
+          name: ${{ steps.version_step.outputs.version_tag }}
+          draft: false
+          prerelease: false
+          files: |
+            bin/Release/netstandard2.0/EasyQuery.dll
+            bin/Release/netstandard2.0/EasyQuery.xml
